@@ -26,20 +26,15 @@ class AnalysisRequest(BaseModel):
     question: str
 
 @app.post("/analyze")
-async def analyze_geo(request: AnalysisRequest):
-    try:
-        # 1. Scrape content
-        scrape_result = firecrawl.scrape(request.url, formats=['markdown'])
-        markdown_content = getattr(scrape_result, 'markdown', "") or ""
-
-@app.post("/analyze")
 async def analyze(request: AnalysisRequest):
     try:
-        # Your existing logic here
-        return {"status": "success", "data": result}
-    except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}") # This will show up in your Render logs
-        raise HTTPException(status_code=500, detail=str(e))
+        # 1. Scrape content using Firecrawl
+        scrape_result = firecrawl.scrape(request.url, formats=['markdown'])
+        markdown_content = getattr(scrape_result, 'markdown', "") or ""
+        
+        if not markdown_content:
+             raise Exception("Scraping returned no content. Check the URL.")
+
         # 2. GEO Analysis Prompt (Strict JSON for index.html)
         system_instruction = (
             "Return ONLY a JSON object with these keys: "
@@ -48,14 +43,18 @@ async def analyze(request: AnalysisRequest):
             "'roadmap' (list of {title, desc})."
         )
 
+        # 3. Generate AI Synthesis
         response = client.models.generate_content(
             model='gemini-2.0-flash',
-            contents=f"Analyze {request.url} for query: {request.question}. Content: {markdown_content[:6000]}",
+            contents=f"Analyze {request.url} compared to {request.competitors} for query: {request.question}. Content: {markdown_content[:6000]}",
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json"
             )
         )
+        
         return json.loads(response.text)
+
     except Exception as e:
+        print(f"CRITICAL ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
