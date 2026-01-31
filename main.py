@@ -32,6 +32,14 @@ async def analyze_geo(request: AnalysisRequest):
         scrape_result = firecrawl.scrape(request.url, formats=['markdown'])
         markdown_content = getattr(scrape_result, 'markdown', "") or ""
 
+@app.post("/analyze")
+async def analyze(request: AnalysisRequest):
+    try:
+        # Your existing logic here
+        return {"status": "success", "data": result}
+    except Exception as e:
+        print(f"CRITICAL ERROR: {str(e)}") # This will show up in your Render logs
+        raise HTTPException(status_code=500, detail=str(e))
         # 2. GEO Analysis Prompt (Strict JSON for index.html)
         system_instruction = (
             "Return ONLY a JSON object with these keys: "
