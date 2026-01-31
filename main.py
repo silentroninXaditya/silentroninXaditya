@@ -22,9 +22,9 @@ app.add_middleware(
 )
 
 class AnalyzeRequest(BaseModel):
-    url: str
-    competitors: str
-    question: str
+    url: str          # Matches frontend 'url'
+    competitors: str  # Matches frontend 'competitors'
+    question: str     # Matches frontend 'question'
 
 def get_content(url: str):
     """Robust scraper with Firecrawl and Requests fallback."""
@@ -34,7 +34,7 @@ def get_content(url: str):
         if not api_key:
             raise ValueError("No Firecrawl Key")
         fc = Firecrawl(api_key=api_key)
-        # Use simple scrape for speed and markdown format
+        # Markdown format is best for Gemini analysis
         result = fc.scrape(url, params={'formats': ['markdown']})
         return result.get('markdown', '') or str(result)
     except Exception as e:
@@ -72,9 +72,9 @@ async def analyze(req: AnalyzeRequest):
             "'roadmap' (list of {title, desc})."
         )
         
-        # 4. Generate Analysis
+        # 4. Generate Analysis using 1.5-Flash for quota stability
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-1.5-flash',
             contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:8000]}",
             config=types.GenerateContentConfig(
                 system_instruction=sys_instr, 
@@ -88,6 +88,10 @@ async def analyze(req: AnalyzeRequest):
     except Exception as e:
         logger.error(f"CRITICAL ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
