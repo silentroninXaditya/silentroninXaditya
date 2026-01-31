@@ -5,6 +5,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# REQUIRED FOR THE 404 FIX
+from google import genai
+from google.genai import types
+from google.genai.types import HttpOptions
+
 # Initialize Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("friday-geo")
@@ -21,9 +26,9 @@ app.add_middleware(
 )
 
 class AnalyzeRequest(BaseModel):
-    url: str          # Matches frontend 'url'
-    competitors: str  # Matches frontend 'competitors'
-    question: str     # Matches frontend 'question'
+    url: str
+    competitors: str
+    question: str
 
 def get_content(url: str):
     """Robust scraper with Firecrawl and Requests fallback."""
@@ -33,8 +38,8 @@ def get_content(url: str):
         if not api_key:
             raise ValueError("No Firecrawl Key")
         fc = Firecrawl(api_key=api_key)
-        # Markdown format is best for Gemini analysis
-        result = fc.scrape(url, params={'formats': ['markdown']})
+        # Fixed: Simplified call to avoid 'params' error in your logs
+        result = fc.scrape(url)
         return result.get('markdown', '') or str(result)
     except Exception as e:
         logger.warning(f"Firecrawl fallback triggered: {e}")
@@ -47,23 +52,23 @@ def get_content(url: str):
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
-        # Import inside function for better error handling on Render
-        from google import genai
-        from google.genai import types
-        
         logger.info(f"Target: {req.url} | Competitors: {req.competitors}")
         
         # 1. Scrape Content
         content = get_content(req.url)
         
-        # 2. Initialize Gemini
+        # 2. Initialize Gemini with STABLE API VERSION (Fixes 404)
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="GEMINI_API_KEY missing in Render environment.")
+            raise HTTPException(status_code=500, detail="GEMINI_API_KEY missing.")
         
-        client = genai.Client(api_key=api_key)
+        # This specific config forces the v1 stable endpoint
+        client = genai.Client(
+            api_key=api_key,
+            http_options=HttpOptions(api_version="v1")
+        )
         
-        # 3. System Instructions for Frontend Compatibility
+        # 3. System Instructions
         sys_instr = (
             "You are Friday, a GEO specialist. Return ONLY JSON with: "
             "'answer' (string), 'entities' (list of strings), "
@@ -71,7 +76,7 @@ async def analyze(req: AnalyzeRequest):
             "'roadmap' (list of {title, desc})."
         )
         
-        # 4. Generate Analysis using 1.5-Flash for quota stability
+        # 4. Generate Analysis
         response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:8000]}",
@@ -81,12 +86,10 @@ async def analyze(req: AnalyzeRequest):
             )
         )
         
-        # Parse and return
         return json.loads(response.text)
 
     except Exception as e:
         logger.error(f"CRITICAL ERROR: {str(e)}")
-        # Send the clean error back so the frontend can display it
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
@@ -94,9 +97,5 @@ async def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-if __name__ == "__main__":
-    import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
