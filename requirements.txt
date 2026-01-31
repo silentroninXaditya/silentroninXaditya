@@ -1,4 +1,6 @@
 fastapi
 uvicorn
+pydantic
+requests
 firecrawl-py
 google-genai
