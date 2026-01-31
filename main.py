@@ -6,11 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+# Initialize Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("friday-geo")
 
 app = FastAPI(title="Friday GEO API")
 
+# Perfect CORS for Frontend Connection
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,33 +27,69 @@ class AnalyzeRequest(BaseModel):
     question: str
 
 def get_content(url: str):
-    # Firecrawl Logic
+    """Robust scraper with Firecrawl and Requests fallback."""
     try:
         from firecrawl import Firecrawl
-        fc = Firecrawl(api_key=os.getenv("FIRECRAWL_API_KEY"))
-        return fc.scrape(url, formats=['markdown']).markdown
-    except:
-        # Fallback to Requests
-        res = requests.get(url, timeout=10)
-        return res.text[:5000]
+        api_key = os.getenv("FIRECRAWL_API_KEY")
+        if not api_key:
+            raise ValueError("No Firecrawl Key")
+        fc = Firecrawl(api_key=api_key)
+        # Use simple scrape for speed and markdown format
+        result = fc.scrape(url, params={'formats': ['markdown']})
+        return result.get('markdown', '') or str(result)
+    except Exception as e:
+        logger.warning(f"Firecrawl fallback triggered: {e}")
+        try:
+            res = requests.get(url, timeout=10, headers={"User-Agent": "Friday/1.0"})
+            return res.text[:5000]
+        except:
+            return "Could not retrieve site content."
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
+        # Import inside function for better error handling on Render
         from google import genai
         from google.genai import types
         
+        logger.info(f"Target: {req.url} | Competitors: {req.competitors}")
+        
+        # 1. Scrape Content
         content = get_content(req.url)
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         
-        sys_instr = "Return ONLY JSON with: 'answer' (str), 'entities' (list), 'comparison' (list of {factor, you, competitor}), 'roadmap' (list of {title, desc})."
+        # 2. Initialize Gemini
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="GEMINI_API_KEY missing in Render environment.")
         
+        client = genai.Client(api_key=api_key)
+        
+        # 3. System Instructions for Frontend Compatibility
+        sys_instr = (
+            "You are Friday, a GEO specialist. Return ONLY JSON with: "
+            "'answer' (string), 'entities' (list of strings), "
+            "'comparison' (list of {factor, you, competitor}), "
+            "'roadmap' (list of {title, desc})."
+        )
+        
+        # 4. Generate Analysis
         response = client.models.generate_content(
             model='gemini-2.0-flash',
-            contents=f"Analyze {req.url} vs {req.competitors} for: {req.question}. Content: {content[:6000]}",
-            config=types.GenerateContentConfig(system_instruction=sys_instr, response_mime_type="application/json")
+            contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:8000]}",
+            config=types.GenerateContentConfig(
+                system_instruction=sys_instr, 
+                response_mime_type="application/json"
+            )
         )
+        
+        # Parse and return
         return json.loads(response.text)
+
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"CRITICAL ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
