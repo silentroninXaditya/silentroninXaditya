@@ -30,11 +30,10 @@ class AnalyzeRequest(BaseModel):
     competitors: str
     question: str
 
-# --- ADDED ROOT ROUTE HERE ---
-@app.get("/")
+# ROOT ROUTE - Supports GET and HEAD to fix Render health check 405s
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"message": "Friday GEO API is active. Send POST requests to /analyze"}
-# -----------------------------
 
 def get_content(url: str):
     """Robust scraper with Firecrawl and Requests fallback."""
@@ -44,7 +43,6 @@ def get_content(url: str):
         if not api_key:
             raise ValueError("No Firecrawl Key")
         fc = Firecrawl(api_key=api_key)
-        # Fixed: Simplified call to avoid 'params' error in your logs
         result = fc.scrape(url)
         return result.get('markdown', '') or str(result)
     except Exception as e:
