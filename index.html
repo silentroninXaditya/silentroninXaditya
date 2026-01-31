@@ -146,6 +146,9 @@ let editingBubble = null;
 let originalEditText = "";
 let isSending = false;
 
+// Storage for AI results to be used across screens
+window.geoData = null;
+
 function safeText(el, text) { el.textContent = text; }
 
 /* ---------- INPUT AUTO RESIZE ---------- */
@@ -162,27 +165,52 @@ themeToggle.onclick = () => {
 
 navReset.onclick = () => location.reload();
 
-/* ---------- ANALYZE ---------- */
-document.getElementById("analyzeBtn").onclick = () => {
+/* ---------- ANALYZE (CONNECTED TO RENDER) ---------- */
+document.getElementById("analyzeBtn").onclick = async () => {
   const d = document.getElementById("domainInput").value;
-  if (!d) return alert("Enter domain");
+  const c = document.getElementById("competitorInput").value;
+  const q = document.getElementById("userQuery").value;
+
+  if (!d || !q) return alert("Please enter a domain and an analysis query.");
 
   document.getElementById("inputScreen").classList.add("hidden");
   document.getElementById("chatSection").classList.remove("hidden");
   navReset.classList.remove("hidden");
 
   showTyping();
-  setTimeout(() => {
+
+  try {
+    // NODE CONNECTION: Calling your FastAPI Backend
+    const response = await fetch('https://silentroninxaditya.onrender.com/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: d, competitors: c, question: q })
+    });
+
+    if (!response.ok) throw new Error("Backend Error: " + response.statusText);
+    
+    const data = await response.json();
+    window.geoData = data; // Save data for comparison/roadmap screens
+    
     hideTyping();
-    addAssistantMessage(`Analysis initialized for ${d}. Synthesizing content signals...`, "Initial Query");
+
+    // Mapping real data to the Chat Section
+    addAssistantMessage(`Analysis completed for ${d}. Synthesizing content signals...`, q);
     document.getElementById("answerScreen").classList.remove("hidden");
-    document.getElementById("aiResponse").textContent =
-      "Generative engines identify your site's core strength as 'Technical Accuracy', but recommend increasing 'Readability Scores' to match competitor benchmarks.";
-    document.getElementById("entityHighlights").innerHTML =
-      ["Clarity", "Semantic Density", "Schema"]
+    
+    // AI Answer Node
+    document.getElementById("aiResponse").textContent = data.answer;
+    
+    // Entities Node
+    document.getElementById("entityHighlights").innerHTML = data.entities
         .map(e => `<span class="px-3 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-500">${e}</span>`)
         .join("");
-  }, 1200);
+
+  } catch (error) {
+    hideTyping();
+    alert("Connection Error: " + error.message);
+    console.error(error);
+  }
 };
 
 /* ---------- NAV BACK ---------- */
@@ -199,63 +227,51 @@ document.getElementById("analyzeBtn").onclick = () => {
 function addUserMessage(text) {
   const msg = document.createElement("div");
   msg.className = "msg user";
-
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   safeText(bubble, text);
-
   const edit = document.createElement("span");
   edit.className = "action-btn edit-btn";
   edit.textContent = "EDIT";
   edit.onclick = () => enterEditMode(bubble);
-
   const cancel = document.createElement("span");
   cancel.className = "action-btn cancel-btn";
   cancel.textContent = "CANCEL";
   cancel.onclick = cancelEdit;
-
   msg.append(bubble, edit, cancel);
   chat.appendChild(msg);
   chat.scrollTop = chat.scrollHeight;
-
   return bubble;
 }
 
 function addAssistantMessage(text, prompt) {
   const msg = document.createElement("div");
   msg.className = "msg assistant";
-
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   bubble.dataset.prompt = prompt;
   safeText(bubble, text);
-
   const regen = document.createElement("span");
   regen.className = "action-btn regen-btn";
   regen.textContent = "REGENERATE";
   regen.onclick = () => regenerate(bubble);
-
   msg.append(bubble, regen);
   chat.appendChild(msg);
   chat.scrollTop = chat.scrollHeight;
 }
 
-/* ---------- EDIT MODE (FIXED) ---------- */
+/* ---------- EDIT & REGENERATE ---------- */
 function enterEditMode(bubble) {
   if (editMode || isSending) return;
-
   editMode = true;
   editingBubble = bubble;
   originalEditText = bubble.textContent;
-
   const cancelBtn = bubble.parentElement.querySelector(".cancel-btn");
   if (cancelBtn) cancelBtn.style.display = "inline-block";
-
   input.value = originalEditText;
-  input.dispatchEvent(new Event("input")); // auto resize
+  input.dispatchEvent(new Event("input"));
   input.focus();
 }
-
 
 function cancelEdit() {
   if (!editMode) return;
@@ -275,30 +291,15 @@ function exitEditMode() {
   input.style.height = "auto";
 }
 
-
-/* ---------- REGENERATE (SAFE) ---------- */
-/* ---------- REGENERATE (FIXED) ---------- */
 function regenerate(bubble) {
   if (isSending || editMode || !bubble) return;
-  
-  // LOCK THE GATE
   isSending = true; 
-  
   const prompt = bubble.dataset.prompt || "context";
   safeText(bubble, "Friday is re-analyzing...");
-  
   setTimeout(() => {
     safeText(bubble, "Updated analysis based on: " + prompt);
-    // OPEN THE GATE
     isSending = false; 
   }, 800);
-}
-
-
-/* ---------- SEND ---------- */
-function getLastAssistantBubble() {
-  const assistants = chat.querySelectorAll(".msg.assistant .bubble");
-  return assistants.length ? assistants[assistants.length - 1] : null;
 }
 
 form.onsubmit = (e) => {
@@ -309,8 +310,6 @@ form.onsubmit = (e) => {
   if (editMode && editingBubble) {
     safeText(editingBubble, text);
     exitEditMode();
-    
-    // Safety check for assistant bubble
     const assistants = chat.querySelectorAll(".msg.assistant .bubble");
     if (assistants.length > 0) {
       const lastAssistant = assistants[assistants.length - 1];
@@ -330,11 +329,9 @@ form.onsubmit = (e) => {
   }, 1000);
 };
 
-
 /* ---------- TYPING ---------- */
 function showTyping() {
-  if (document.getElementById("typing")) return; // prevent duplicates
-
+  if (document.getElementById("typing")) return;
   const t = document.createElement("div");
   t.id = "typing";
   t.className = "msg assistant";
@@ -347,51 +344,38 @@ function hideTyping() {
   const t = document.getElementById("typing");
   if (t) t.remove();
 }
-/* ---------- DEEP COMPARISON & ROADMAP LOGIC ---------- */
 
-// 1. Link the "Deep Comparison" button
+/* ---------- DEEP COMPARISON & ROADMAP (CONNECTED TO DYNAMIC DATA) ---------- */
+
 document.getElementById("toGeoBtn").onclick = () => {
+  if (!window.geoData) return alert("Analysis not loaded yet.");
   document.getElementById("chatSection").classList.add("hidden");
   document.getElementById("geoScreen").classList.remove("hidden");
 
-  // Populate comparison table with data
+  // Populate comparison table with data from Gemini
   const tbody = document.getElementById("comparisonBody");
-  tbody.innerHTML = `
+  tbody.innerHTML = window.geoData.comparison.map(item => `
     <tr>
-      <td class="p-4 font-bold">Semantic Depth</td>
-      <td class="p-4 text-red-500">Low Coverage</td>
-      <td class="p-4 text-green-500">Comprehensive</td>
+      <td class="p-4 font-bold">${item.factor}</td>
+      <td class="p-4 text-orange-500">${item.you}</td>
+      <td class="p-4 text-green-500">${item.competitor}</td>
     </tr>
-    <tr>
-      <td class="p-4 font-bold">Technical Clarity</td>
-      <td class="p-4 text-orange-500">65% Score</td>
-      <td class="p-4 text-green-500">85% Score</td>
-    </tr>
-    <tr>
-      <td class="p-4 font-bold">Structured Data</td>
-      <td class="p-4 text-red-500">Missing FAQ</td>
-      <td class="p-4 text-green-500">Optimized Schema</td>
-    </tr>
-  `;
+  `).join("");
 };
 
-// 2. Link the "View Roadmap" button
 document.getElementById("toOptimizeBtn").onclick = () => {
+  if (!window.geoData) return alert("Analysis not loaded yet.");
   document.getElementById("geoScreen").classList.add("hidden");
   document.getElementById("optScreen").classList.remove("hidden");
 
-  // Populate the Roadmap recommendations
+  // Populate the Roadmap with real AI recommendations
   const list = document.getElementById("recommendationList");
-  list.innerHTML = `
-    <div class="p-5 rounded-2xl bg-[var(--panel)] border border-[var(--border)] animate-fade">
-      <h4 class="font-bold text-blue-500 mb-2">Structure: Content Formatting</h4>
-      <p class="text-sm text-[var(--muted)]">Convert technical bullet points into step-by-step numbered lists. Generative engines prefer sequential logic for extraction.</p>
+  list.innerHTML = window.geoData.roadmap.map((step, index) => `
+    <div class="p-5 rounded-2xl bg-[var(--panel)] border border-[var(--border)] animate-fade" style="animation-delay: ${index * 0.1}s">
+      <h4 class="font-bold text-blue-500 mb-2">${step.title}</h4>
+      <p class="text-sm text-[var(--muted)]">${step.desc}</p>
     </div>
-    <div class="p-5 rounded-2xl bg-[var(--panel)] border border-[var(--border)] animate-fade" style="animation-delay: 0.1s">
-      <h4 class="font-bold text-blue-500 mb-2">Semantic: Entity Enrichment</h4>
-      <p class="text-sm text-[var(--muted)]">Add clear definitions for your core services. Currently, competitors are being cited because they provide direct 'What is X' answers.</p>
-    </div>
-  `;
+  `).join("");
 };
 </script>
 
