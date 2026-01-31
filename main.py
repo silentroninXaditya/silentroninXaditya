@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-import os, json, logging, requests
+import os, json, logging, requests, uvicorn
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Initialize Logging
@@ -87,12 +86,16 @@ async def analyze(req: AnalyzeRequest):
 
     except Exception as e:
         logger.error(f"CRITICAL ERROR: {str(e)}")
+        # Send the clean error back so the frontend can display it
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
