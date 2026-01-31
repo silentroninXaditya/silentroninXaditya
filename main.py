@@ -5,10 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# REQUIRED FOR STABLE v1 HANDSHAKE
+# Using the modern GenAI SDK for maximum free-tier stability
 from google import genai
 from google.genai import types
-from google.genai.types import HttpOptions
 
 # Initialize Logging
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +15,7 @@ logger = logging.getLogger("friday-geo")
 
 app = FastAPI(title="Friday GEO API")
 
-# Perfect CORS for Frontend Connection
+# CORS Setup - Essential for your GitHub frontend to communicate with Render
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,47 +29,44 @@ class AnalyzeRequest(BaseModel):
     competitors: str
     question: str
 
-# ROOT ROUTE - Supports GET and HEAD for Render Health Checks
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    return {"message": "Friday GEO API is active. Send POST requests to /analyze"}
+    return {"message": "Friday GEO API is active. Ready for free-tier analysis."}
 
 def get_content(url: str):
-    """Robust scraper with Firecrawl and Requests fallback."""
+    """Scraper: Uses Firecrawl with a robust Requests fallback."""
     try:
         from firecrawl import Firecrawl
         api_key = os.getenv("FIRECRAWL_API_KEY")
         if api_key:
             fc = Firecrawl(api_key=api_key)
             result = fc.scrape(url)
-            return result.get('markdown', '') or str(result)
+            # Handle both dict and object returns from Firecrawl
+            return result.get('markdown', '') if isinstance(result, dict) else str(result)
     except Exception as e:
-        logger.warning(f"Firecrawl fallback triggered: {e}")
+        logger.warning(f"Firecrawl fallback: {e}")
     
     try:
         res = requests.get(url, timeout=10, headers={"User-Agent": "Friday/1.0"})
-        return res.text[:8000]
+        return res.text[:10000] # Limit context to save tokens
     except:
-        return "Could not retrieve site content."
+        return "Content unavailable."
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
-        logger.info(f"Target: {req.url} | Competitors: {req.competitors}")
-        
+        logger.info(f"Processing: {req.url}")
         content = get_content(req.url)
+        
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY missing.")
         
-        # 1. FORCE STABLE v1 VERSION (Safely)
-        client = genai.Client(
-            api_key=api_key,
-            http_options=HttpOptions(api_version="v1")
-        )
+        # STABILITY FIX: Initialize standard client without forcing internal versioning
+        # This prevents the 400 'systemInstruction' naming error.
+        client = genai.Client(api_key=api_key)
         
-        # 2. PRO ADDON: Strict Response Schema
-        # This tells Gemini 1.5 EXACTLY what the JSON should look like.
+        # PRO SCHEMA: Hard-coding the output format ensures Gemini never breaks your UI
         response_schema = {
             "type": "OBJECT",
             "properties": {
@@ -81,9 +77,7 @@ async def analyze(req: AnalyzeRequest):
                     "items": {
                         "type": "OBJECT",
                         "properties": {
-                            "factor": {"type": "STRING"},
-                            "you": {"type": "STRING"},
-                            "competitor": {"type": "STRING"}
+                            "factor": {"type": "STRING"}, "you": {"type": "STRING"}, "competitor": {"type": "STRING"}
                         }
                     }
                 },
@@ -92,37 +86,35 @@ async def analyze(req: AnalyzeRequest):
                     "items": {
                         "type": "OBJECT",
                         "properties": {
-                            "title": {"type": "STRING"},
-                            "desc": {"type": "STRING"}
+                            "title": {"type": "STRING"}, "desc": {"type": "STRING"}
                         }
                     }
                 }
-            }
+            },
+            "required": ["answer", "entities", "comparison", "roadmap"]
         }
-        
-        sys_instr = "You are Friday, a GEO specialist. Analyze the content and return findings in the requested JSON schema."
-        
-        # 3. GENERATE
+
+        # The Prompt: Feeding everything into the Flash model (Fast & Free)
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:10000]}",
+            contents=f"Analyze this for GEO. Query: {req.question}\nSite: {req.url}\nCompetitors: {req.competitors}\nData: {content[:15000]}",
             config=types.GenerateContentConfig(
-                system_instruction=sys_instr, 
+                system_instruction="You are Friday, a GEO specialist. Extract insights and return valid JSON.",
                 response_mime_type="application/json",
-                response_schema=response_schema, # Ensures perfect JSON every time
-                temperature=0.1
+                response_schema=response_schema,
+                temperature=0.2
             )
         )
         
         return json.loads(response.text)
 
     except Exception as e:
-        logger.error(f"CRITICAL ERROR: {str(e)}")
+        logger.error(f"Friday Analysis Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "alive"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
