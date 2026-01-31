@@ -30,6 +30,12 @@ class AnalyzeRequest(BaseModel):
     competitors: str
     question: str
 
+# --- ADDED ROOT ROUTE HERE ---
+@app.get("/")
+async def root():
+    return {"message": "Friday GEO API is active. Send POST requests to /analyze"}
+# -----------------------------
+
 def get_content(url: str):
     """Robust scraper with Firecrawl and Requests fallback."""
     try:
