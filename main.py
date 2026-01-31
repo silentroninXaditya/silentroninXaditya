@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# REQUIRED FOR THE 404 FIX
+# REQUIRED FOR STABLE v1 HANDSHAKE
 from google import genai
 from google.genai import types
 from google.genai.types import HttpOptions
@@ -30,7 +30,7 @@ class AnalyzeRequest(BaseModel):
     competitors: str
     question: str
 
-# ROOT ROUTE - Supports GET and HEAD to fix Render health check 405s
+# ROOT ROUTE - Supports GET and HEAD for Render Health Checks
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"message": "Friday GEO API is active. Send POST requests to /analyze"}
@@ -40,53 +40,77 @@ def get_content(url: str):
     try:
         from firecrawl import Firecrawl
         api_key = os.getenv("FIRECRAWL_API_KEY")
-        if not api_key:
-            raise ValueError("No Firecrawl Key")
-        fc = Firecrawl(api_key=api_key)
-        result = fc.scrape(url)
-        return result.get('markdown', '') or str(result)
+        if api_key:
+            fc = Firecrawl(api_key=api_key)
+            result = fc.scrape(url)
+            return result.get('markdown', '') or str(result)
     except Exception as e:
         logger.warning(f"Firecrawl fallback triggered: {e}")
-        try:
-            res = requests.get(url, timeout=10, headers={"User-Agent": "Friday/1.0"})
-            return res.text[:5000]
-        except:
-            return "Could not retrieve site content."
+    
+    try:
+        res = requests.get(url, timeout=10, headers={"User-Agent": "Friday/1.0"})
+        return res.text[:8000]
+    except:
+        return "Could not retrieve site content."
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
         logger.info(f"Target: {req.url} | Competitors: {req.competitors}")
         
-        # 1. Scrape Content
         content = get_content(req.url)
-        
-        # 2. Initialize Gemini with STABLE API VERSION (Fixes 404)
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY missing.")
         
-        # This specific config forces the v1 stable endpoint
+        # 1. FORCE STABLE v1 VERSION (Safely)
         client = genai.Client(
             api_key=api_key,
             http_options=HttpOptions(api_version="v1")
         )
         
-        # 3. System Instructions
-        sys_instr = (
-            "You are Friday, a GEO specialist. Return ONLY JSON with: "
-            "'answer' (string), 'entities' (list of strings), "
-            "'comparison' (list of {factor, you, competitor}), "
-            "'roadmap' (list of {title, desc})."
-        )
+        # 2. PRO ADDON: Strict Response Schema
+        # This tells Gemini 1.5 EXACTLY what the JSON should look like.
+        response_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "answer": {"type": "STRING"},
+                "entities": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "comparison": {
+                    "type": "ARRAY", 
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "factor": {"type": "STRING"},
+                            "you": {"type": "STRING"},
+                            "competitor": {"type": "STRING"}
+                        }
+                    }
+                },
+                "roadmap": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "title": {"type": "STRING"},
+                            "desc": {"type": "STRING"}
+                        }
+                    }
+                }
+            }
+        }
         
-        # 4. Generate Analysis
+        sys_instr = "You are Friday, a GEO specialist. Analyze the content and return findings in the requested JSON schema."
+        
+        # 3. GENERATE
         response = client.models.generate_content(
             model='gemini-1.5-flash',
-            contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:8000]}",
+            contents=f"User Query: {req.question}\nTarget: {req.url}\nCompetitors: {req.competitors}\nContent: {content[:10000]}",
             config=types.GenerateContentConfig(
                 system_instruction=sys_instr, 
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                response_schema=response_schema, # Ensures perfect JSON every time
+                temperature=0.1
             )
         )
         
