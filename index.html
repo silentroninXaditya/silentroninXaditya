@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Friday AI - GEO Optimizer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0b0d; --panel: #141417; --user: #2563eb; --assistant: #1f1f23;
+  --text: #f3f4f6; --muted: #94a3b8; --border: #27272a;
+}
+body.light {
+  --bg: #f1f5f9; --panel: #ffffff; --user: #2563eb; --assistant: #f8fafc;
+  --text: #0f172a; --muted: #64748b; --border: #e2e8f0;
+}
+* { box-sizing: border-box; font-family: 'Inter', sans-serif; transition: background 0.2s ease, color 0.2s ease; }
+body { background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+/* Animations */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade { animation: fadeInUp 0.4s ease forwards; }
+
+/* Chat Bubbles Core */
+.msg { display: flex; margin-bottom: 28px; position: relative; animation: fadeInUp 0.3s ease; }
+.msg.user { justify-content: flex-end; }
+.bubble {
+  max-width: 80%; padding: 14px 18px; font-size: 15px; line-height: 1.6; border-radius: 18px;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+}
+.msg.user .bubble { background: var(--user); color: #fff; border-bottom-right-radius: 4px; }
+.msg.assistant .bubble { background: var(--panel); color: var(--text); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
+
+.action-btn {
+  position: absolute; bottom: -22px; font-size: 10px; font-weight: 600;
+  color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.2s;
+  background: var(--assistant); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);
+}
+.msg:hover .action-btn { opacity: 1; }
+.edit-btn { right: 10px; }
+.regen-btn { left: 10px; }
+.cancel-btn { right: 50px; color: #ef4444 !important; border-color: #ef444444 !important; display: none; }
+
+.hidden { display: none !important; }
+
+/* Scrollbar */
+* { scrollbar-width: thin; scrollbar-color: #2e2e2e transparent; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; } 
+::-webkit-scrollbar-thumb { background-color: #2e2e2e; border-radius: 10px; } 
+::-webkit-scrollbar-thumb:hover { background-color: #444; }
+</style>
+</head>
+<body class="flex flex-col items-center min-h-screen">
+
+<header class="w-full border-b border-[var(--border)] bg-[var(--panel)]/90 backdrop-blur-lg sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+    <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center font-bold text-white shadow-lg">F</div>
+        <span class="font-bold text-xl tracking-tight">Friday <span class="text-blue-500">GEO</span></span>
+    </div>
+    <div class="flex items-center gap-4">
+        <button id="navReset" class="hidden text-xs font-bold px-4 py-2 rounded-lg bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-600 hover:text-white transition-all">New Analysis</button>
+        <button id="themeToggle" class="p-2 rounded-xl bg-[var(--assistant)] border border-[var(--border)]">☀️</button>
+    </div>
+  </div>
+</header>
+
+<main class="w-full max-w-4xl flex-1 flex flex-col p-6 space-y-10">
+
+  <section id="inputScreen" class="space-y-8 animate-fade py-10">
+    <div class="text-center space-y-2">
+        <h1 class="text-4xl font-black">Friday <span class="text-blue-500">Intelligence</span></h1>
+        <p class="text-[var(--muted)]">Optimize your content for the Generative Search Era.</p>
+    </div>
+    <div class="grid gap-6 p-8 rounded-3xl bg-[var(--panel)] border border-[var(--border)] shadow-2xl">
+        <div class="space-y-2">
+            <label class="text-xs font-bold uppercase text-blue-500">Target Website</label>
+            <input id="domainInput" type="url" placeholder="https://yourbrand.com" class="w-full p-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:ring-2 focus:ring-blue-500"/>
+        </div>
+        <div class="space-y-2">
+            <label class="text-xs font-bold uppercase text-blue-500">Competitors (Comma separated)</label>
+            <input id="competitorInput" type="text" placeholder="https://comp-a.com, https://comp-b.com" class="w-full p-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:ring-2 focus:ring-blue-500"/>
+        </div>
+        <div class="space-y-2">
+            <label class="text-xs font-bold uppercase text-blue-500">Analysis Query</label>
+            <input id="userQuery" type="text" placeholder="e.g. How does our product handle security?" class="w-full p-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:ring-2 focus:ring-blue-500"/>
+        </div>
+        <button id="analyzeBtn" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-600/20 transition-all">Initialize Analysis</button>
+    </div>
+  </section>
+
+  <section id="chatSection" class="hidden flex-1 flex flex-col space-y-6 animate-fade">
+    <div id="chat" class="flex-1 overflow-y-auto min-h-[400px] space-y-4"></div>
+    
+    <div id="answerScreen" class="hidden p-8 rounded-3xl border border-[var(--border)] bg-[var(--panel)] shadow-xl animate-fade">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="font-bold text-blue-500">AI Synthesis</h2>
+            <span class="text-[10px] font-bold px-2 py-1 rounded bg-blue-500 text-white">GENERATED</span>
+        </div>
+        <p id="aiResponse" class="text-sm leading-relaxed mb-6"></p>
+        <div class="flex flex-wrap gap-2 mb-6" id="entityHighlights"></div>
+        <button id="toGeoBtn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all">Deep Comparison →</button>
+    </div>
+
+    <form id="form" class="relative group">
+      <textarea id="input" rows="1" placeholder="Type to refine..." class="w-full p-5 pr-16 rounded-2xl border border-[var(--border)] bg-[var(--panel)] text-[var(--text)] outline-none focus:ring-2 focus:ring-blue-500 shadow-lg resize-none"></textarea>
+      <button type="submit" class="absolute right-4 top-4 p-2.5 bg-blue-600 text-white rounded-xl"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg></button>
+    </form>
+  </section>
+
+  <section id="geoScreen" class="hidden animate-fade">
+    <div class="p-8 rounded-3xl bg-[var(--panel)] border border-[var(--border)]">
+        <h2 class="text-xl font-bold mb-6">Competitive Gaps</h2>
+        <div class="overflow-hidden rounded-2xl border border-[var(--border)]">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-[var(--assistant)] text-[var(--muted)]"><tr><th class="p-4">Factor</th><th class="p-4">Your Brand</th><th class="p-4">Benchmark</th></tr></thead>
+              <tbody id="comparisonBody" class="divide-y divide-[var(--border)]"></tbody>
+            </table>
+        </div>
+        <div class="flex gap-4 mt-8">
+            <button id="backToChatFromGeo" class="flex-1 py-4 bg-[var(--assistant)] border border-[var(--border)] rounded-2xl font-bold hover:bg-[var(--border)] transition-all">← Back to Chat</button>
+            <button id="toOptimizeBtn" class="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all">View Roadmap →</button>
+        </div>
+    </div>
+  </section>
+
+  <section id="optScreen" class="hidden animate-fade space-y-6">
+    <h2 class="text-2xl font-bold px-2">Optimization Roadmap</h2>
+    <div id="recommendationList" class="grid gap-4"></div>
+    <button id="backToChatFromOpt" class="w-full py-4 bg-[var(--assistant)] border border-[var(--border)] rounded-2xl font-bold hover:bg-[var(--border)] transition-all">← Back to Chat & Analysis</button>
+  </section>
+
+</main>
+
+<script>
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const chat = document.getElementById("chat");
+const themeToggle = document.getElementById("themeToggle");
+const navReset = document.getElementById("navReset");
+
+let editMode = false;
+let editingBubble = null;
+let originalEditText = "";
+let isSending = false;
+
+function safeText(el, text) { el.textContent = text; }
+
+/* ---------- INPUT AUTO RESIZE ---------- */
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = input.scrollHeight + "px";
+});
+
+/* ---------- THEME ---------- */
+themeToggle.onclick = () => {
+  document.body.classList.toggle("light");
+  themeToggle.textContent = document.body.classList.contains("light") ? "🌙" : "☀️";
+};
+
+navReset.onclick = () => location.reload();
+
+/* ---------- ANALYZE ---------- */
+document.getElementById("analyzeBtn").onclick = () => {
+  const d = document.getElementById("domainInput").value;
+  if (!d) return alert("Enter domain");
+
+  document.getElementById("inputScreen").classList.add("hidden");
+  document.getElementById("chatSection").classList.remove("hidden");
+  navReset.classList.remove("hidden");
+
+  showTyping();
+  setTimeout(() => {
+    hideTyping();
+    addAssistantMessage(`Analysis initialized for ${d}. Synthesizing content signals...`, "Initial Query");
+    document.getElementById("answerScreen").classList.remove("hidden");
+    document.getElementById("aiResponse").textContent =
+      "Generative engines identify your site's core strength as 'Technical Accuracy', but recommend increasing 'Readability Scores' to match competitor benchmarks.";
+    document.getElementById("entityHighlights").innerHTML =
+      ["Clarity", "Semantic Density", "Schema"]
+        .map(e => `<span class="px-3 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-500">${e}</span>`)
+        .join("");
+  }, 1200);
+};
+
+/* ---------- NAV BACK ---------- */
+["backToChatFromGeo", "backToChatFromOpt"].forEach(id => {
+  const btn = document.getElementById(id);
+  if (btn) btn.onclick = () => {
+    document.getElementById("geoScreen").classList.add("hidden");
+    document.getElementById("optScreen").classList.add("hidden");
+    document.getElementById("chatSection").classList.remove("hidden");
+  };
+});
+
+/* ---------- CHAT ---------- */
+function addUserMessage(text) {
+  const msg = document.createElement("div");
+  msg.className = "msg user";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  safeText(bubble, text);
+
+  const edit = document.createElement("span");
+  edit.className = "action-btn edit-btn";
+  edit.textContent = "EDIT";
+  edit.onclick = () => enterEditMode(bubble);
+
+  const cancel = document.createElement("span");
+  cancel.className = "action-btn cancel-btn";
+  cancel.textContent = "CANCEL";
+  cancel.onclick = cancelEdit;
+
+  msg.append(bubble, edit, cancel);
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+
+  return bubble;
+}
+
+function addAssistantMessage(text, prompt) {
+  const msg = document.createElement("div");
+  msg.className = "msg assistant";
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.dataset.prompt = prompt;
+  safeText(bubble, text);
+
+  const regen = document.createElement("span");
+  regen.className = "action-btn regen-btn";
+  regen.textContent = "REGENERATE";
+  regen.onclick = () => regenerate(bubble);
+
+  msg.append(bubble, regen);
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/* ---------- EDIT MODE (FIXED) ---------- */
+function enterEditMode(bubble) {
+  if (editMode || isSending) return;
+
+  editMode = true;
+  editingBubble = bubble;
+  originalEditText = bubble.textContent;
+
+  const cancelBtn = bubble.parentElement.querySelector(".cancel-btn");
+  if (cancelBtn) cancelBtn.style.display = "inline-block";
+
+  input.value = originalEditText;
+  input.dispatchEvent(new Event("input")); // auto resize
+  input.focus();
+}
+
+
+function cancelEdit() {
+  if (!editMode) return;
+  safeText(editingBubble, originalEditText);
+  exitEditMode();
+}
+
+function exitEditMode() {
+  if (editingBubble && editingBubble.parentElement) {
+    const cancelBtn = editingBubble.parentElement.querySelector(".cancel-btn");
+    if (cancelBtn) cancelBtn.style.display = "none";
+  }
+  editMode = false;
+  isSending = false;
+  editingBubble = null;
+  input.value = "";
+  input.style.height = "auto";
+}
+
+
+/* ---------- REGENERATE (SAFE) ---------- */
+/* ---------- REGENERATE (FIXED) ---------- */
+function regenerate(bubble) {
+  if (isSending || editMode || !bubble) return;
+  
+  // LOCK THE GATE
+  isSending = true; 
+  
+  const prompt = bubble.dataset.prompt || "context";
+  safeText(bubble, "Friday is re-analyzing...");
+  
+  setTimeout(() => {
+    safeText(bubble, "Updated analysis based on: " + prompt);
+    // OPEN THE GATE
+    isSending = false; 
+  }, 800);
+}
+
+
+/* ---------- SEND ---------- */
+function getLastAssistantBubble() {
+  const assistants = chat.querySelectorAll(".msg.assistant .bubble");
+  return assistants.length ? assistants[assistants.length - 1] : null;
+}
+
+form.onsubmit = (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || isSending) return;
+
+  if (editMode && editingBubble) {
+    safeText(editingBubble, text);
+    exitEditMode();
+    
+    // Safety check for assistant bubble
+    const assistants = chat.querySelectorAll(".msg.assistant .bubble");
+    if (assistants.length > 0) {
+      const lastAssistant = assistants[assistants.length - 1];
+      lastAssistant.dataset.prompt = text; 
+      regenerate(lastAssistant); 
+    }
+    return;
+  }
+
+  addUserMessage(text);
+  input.value = "";
+  input.style.height = "auto";
+  showTyping();
+  setTimeout(() => {
+    hideTyping();
+    addAssistantMessage("Refining analysis based on: " + text, text);
+  }, 1000);
+};
+
+
+/* ---------- TYPING ---------- */
+function showTyping() {
+  if (document.getElementById("typing")) return; // prevent duplicates
+
+  const t = document.createElement("div");
+  t.id = "typing";
+  t.className = "msg assistant";
+  t.innerHTML = `<div class="bubble" style="opacity:0.5">Friday is thinking...</div>`;
+  chat.appendChild(t);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function hideTyping() {
+  const t = document.getElementById("typing");
+  if (t) t.remove();
+}
+/* ---------- DEEP COMPARISON & ROADMAP LOGIC ---------- */
+
+// 1. Link the "Deep Comparison" button
+document.getElementById("toGeoBtn").onclick = () => {
+  document.getElementById("chatSection").classList.add("hidden");
+  document.getElementById("geoScreen").classList.remove("hidden");
+
+  // Populate comparison table with data
+  const tbody = document.getElementById("comparisonBody");
+  tbody.innerHTML = `
+    <tr>
+      <td class="p-4 font-bold">Semantic Depth</td>
+      <td class="p-4 text-red-500">Low Coverage</td>
+      <td class="p-4 text-green-500">Comprehensive</td>
+    </tr>
+    <tr>
+      <td class="p-4 font-bold">Technical Clarity</td>
+      <td class="p-4 text-orange-500">65% Score</td>
+      <td class="p-4 text-green-500">85% Score</td>
+    </tr>
+    <tr>
+      <td class="p-4 font-bold">Structured Data</td>
+      <td class="p-4 text-red-500">Missing FAQ</td>
+      <td class="p-4 text-green-500">Optimized Schema</td>
+    </tr>
+  `;
+};
+
+// 2. Link the "View Roadmap" button
+document.getElementById("toOptimizeBtn").onclick = () => {
+  document.getElementById("geoScreen").classList.add("hidden");
+  document.getElementById("optScreen").classList.remove("hidden");
+
+  // Populate the Roadmap recommendations
+  const list = document.getElementById("recommendationList");
+  list.innerHTML = `
+    <div class="p-5 rounded-2xl bg-[var(--panel)] border border-[var(--border)] animate-fade">
+      <h4 class="font-bold text-blue-500 mb-2">Structure: Content Formatting</h4>
+      <p class="text-sm text-[var(--muted)]">Convert technical bullet points into step-by-step numbered lists. Generative engines prefer sequential logic for extraction.</p>
+    </div>
+    <div class="p-5 rounded-2xl bg-[var(--panel)] border border-[var(--border)] animate-fade" style="animation-delay: 0.1s">
+      <h4 class="font-bold text-blue-500 mb-2">Semantic: Entity Enrichment</h4>
+      <p class="text-sm text-[var(--muted)]">Add clear definitions for your core services. Currently, competitors are being cited because they provide direct 'What is X' answers.</p>
+    </div>
+  `;
+};
+</script>
+
+</body>
+
+</html>
