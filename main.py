@@ -1,60 +1,57 @@
-import os, json, httpx
+#!/usr/bin/env python3
+import os, json, logging, requests
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from firecrawl import Firecrawl
-from google import genai
-from google.genai import types
 
-app = FastAPI()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("friday-geo")
 
-# Enable CORS so your index.html can talk to this server
+app = FastAPI(title="Friday GEO API")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize Clients
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-firecrawl = Firecrawl(api_key=os.getenv("FIRECRAWL_API_KEY"))
-
-class AnalysisRequest(BaseModel):
+class AnalyzeRequest(BaseModel):
     url: str
     competitors: str
     question: str
 
-@app.post("/analyze")
-async def analyze(request: AnalysisRequest):
+def get_content(url: str):
+    # Firecrawl Logic
     try:
-        # 1. Scrape content using Firecrawl
-        scrape_result = firecrawl.scrape(request.url, formats=['markdown'])
-        markdown_content = getattr(scrape_result, 'markdown', "") or ""
+        from firecrawl import Firecrawl
+        fc = Firecrawl(api_key=os.getenv("FIRECRAWL_API_KEY"))
+        return fc.scrape(url, formats=['markdown']).markdown
+    except:
+        # Fallback to Requests
+        res = requests.get(url, timeout=10)
+        return res.text[:5000]
+
+@app.post("/analyze")
+async def analyze(req: AnalyzeRequest):
+    try:
+        from google import genai
+        from google.genai import types
         
-        if not markdown_content:
-             raise Exception("Scraping returned no content. Check the URL.")
-
-        # 2. GEO Analysis Prompt (Strict JSON for index.html)
-        system_instruction = (
-            "Return ONLY a JSON object with these keys: "
-            "'answer' (string), 'entities' (list), "
-            "'comparison' (list of {factor, you, competitor}), "
-            "'roadmap' (list of {title, desc})."
-        )
-
-        # 3. Generate AI Synthesis
+        content = get_content(req.url)
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        
+        sys_instr = "Return ONLY JSON with: 'answer' (str), 'entities' (list), 'comparison' (list of {factor, you, competitor}), 'roadmap' (list of {title, desc})."
+        
         response = client.models.generate_content(
             model='gemini-2.0-flash',
-            contents=f"Analyze {request.url} compared to {request.competitors} for query: {request.question}. Content: {markdown_content[:6000]}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json"
-            )
+            contents=f"Analyze {req.url} vs {req.competitors} for: {req.question}. Content: {content[:6000]}",
+            config=types.GenerateContentConfig(system_instruction=sys_instr, response_mime_type="application/json")
         )
-        
         return json.loads(response.text)
-
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
+        logger.error(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
