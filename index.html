@@ -165,7 +165,7 @@ themeToggle.onclick = () => {
 
 navReset.onclick = () => location.reload();
 
-/* ---------- ANALYZE (CONNECTED TO RENDER) ---------- */
+/* ---------- ANALYZE (FIXED HANDSHAKE) ---------- */
 document.getElementById("analyzeBtn").onclick = async () => {
   const d = document.getElementById("domainInput").value;
   const c = document.getElementById("competitorInput").value;
@@ -184,10 +184,17 @@ document.getElementById("analyzeBtn").onclick = async () => {
     const response = await fetch('https://silentroninxaditya.onrender.com/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: d, competitors: c, question: q })
+      body: JSON.stringify({ 
+        url: d,             // Key matched to backend AnalyzeRequest
+        competitors: c,     // Key matched to backend AnalyzeRequest
+        question: q         // Key matched to backend AnalyzeRequest
+      })
     });
 
-    if (!response.ok) throw new Error("Backend Error: " + response.statusText);
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || response.statusText);
+    }
     
     const data = await response.json();
     window.geoData = data; // Save data for comparison/roadmap screens
@@ -345,7 +352,7 @@ function hideTyping() {
   if (t) t.remove();
 }
 
-/* ---------- DEEP COMPARISON & ROADMAP (CONNECTED TO DYNAMIC DATA) ---------- */
+/* ---------- DEEP COMPARISON & ROADMAP (FIXED KEYS) ---------- */
 
 document.getElementById("toGeoBtn").onclick = () => {
   if (!window.geoData) return alert("Analysis not loaded yet.");
