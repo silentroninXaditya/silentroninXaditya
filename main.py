@@ -25,24 +25,24 @@ class AnalyzeRequest(BaseModel):
     question: str
 
 async def get_jina_content(url: str):
-    """
-    Scraper: Jina Reader API.
-    Converts any URL to LLM-ready Markdown.
-    """
     jina_key = os.getenv("JINA_API_KEY")
     headers = {"X-Return-Format": "markdown"}
     if jina_key:
         headers["Authorization"] = f"Bearer {jina_key}"
         
     try:
-        # Clean URL to prevent routing errors
+        # FIX: URL Preprocessing Node
         clean_url = url.strip().replace(" ", "")
+        if not clean_url.startswith(("http://", "https://")):
+            clean_url = f"https://{clean_url}"
+            
         jina_url = f"https://r.jina.ai/{clean_url}"
         async with httpx.AsyncClient() as client:
-            # 15s timeout per request to keep the total cycle under Render's limit
+            # FIX: Timeout Node (15s to stay well under Render's 30s limit)
             response = await client.get(jina_url, headers=headers, timeout=15.0)
             if response.status_code == 200:
-                return response.text[:8000] # Optimized chunk size for context window
+                # FIX: Context Window Node (Trimming to 8000 chars)
+                return response.text[:8000] 
             return "" 
     except Exception as e:
         logger.error(f"Scrape failed for {url}: {e}")
