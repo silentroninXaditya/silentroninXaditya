@@ -49,33 +49,29 @@ async def get_jina_content(url: str):
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
-        # 1. Scrape with Jina
         content = await get_jina_content(req.url)
-        
-        # 2. Setup Groq Client
         groq_key = os.getenv("GROQ_API_KEY")
         if not groq_key:
             raise HTTPException(status_code=500, detail="GROQ_API_KEY missing")
         
         client = AsyncGroq(api_key=groq_key)
         
-        # 3. Request Llama 3.3 70B with JSON Object Mode
+        # System instruction tuned for 100-150 line expert analysis
+        system_msg = (
+            "You are Friday, a GEO Intelligence Expert. Analyze content deeply. "
+            "You MUST return a JSON object with a field 'big_chat' containing a 100-150 line expert report "
+            "using Markdown (bolding, lists). Also fill 'answer', 'entities', 'comparison', and 'roadmap'."
+        )
+
         chat_completion = await client.chat.completions.create(
             messages=[
-                {
-                    "role": "system", 
-                    "content": "You are Friday, a GEO (Generative Engine Optimization) expert. "
-                               "Analyze the provided web content and return a detailed report in JSON format. "
-                               "Structure: { 'answer': '', 'entities': [], 'comparison': [{'factor': '', 'you': '', 'competitor': ''}], 'roadmap': [{'title': '', 'desc': ''}] }"
-                },
-                {
-                    "role": "user", 
-                    "content": f"URL: {req.url}\nCompetitors: {req.competitors}\nQuestion: {req.question}\n\nContent: {content}"
-                }
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": f"URL: {req.url}\nCompetitors: {req.competitors}\nQuestion: {req.question}\n\nContent: {content}"}
             ],
-            model="llama-3.3-70b-versatile", # High-performance 2026 model
+            model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"},
-            temperature=0.2
+            max_tokens=4000, # Large overhead for 150 lines
+            temperature=0.5
         )
         
         return json.loads(chat_completion.choices[0].message.content)
