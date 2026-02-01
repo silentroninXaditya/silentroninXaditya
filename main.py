@@ -91,7 +91,7 @@ async def analyze(req: AnalyzeRequest):
                 {"role": "user", "content": user_content}
             ],
         # Change from llama-3.3-70b-versatile to:
-model="llama-3.1-8b-instant",
+model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"},
             max_tokens=4000,
             temperature=0.4 # Lower temperature for more stable JSON formatting
