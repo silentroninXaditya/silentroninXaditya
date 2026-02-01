@@ -206,32 +206,44 @@ async function performFullAnalysis(domain, competitors, query) {
   showTyping();
 
   try {
+    // FIX: Client-side URL Preprocessing to ensure backend compatibility
+    const cleanDomain = domain.trim().replace(/\s/g, "");
+    const formattedDomain = cleanDomain.startsWith("http") ? cleanDomain : `https://${cleanDomain}`;
+
     const response = await fetch('https://silentroninxaditya.onrender.com/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
-        url: domain, 
+        url: formattedDomain, 
         competitors: competitors, 
         question: query 
       })
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Server error");
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Server error: ${response.status}`);
     }
     
     const data = await response.json();
-    window.geoData = data; // Store globally for Table/Roadmap screens
+    
+    // FIX: Optional Chaining & Fallbacks to prevent UI crashes if keys are missing
+    window.geoData = {
+      big_chat: data?.big_chat || data?.answer || "Analysis generation failed.",
+      answer: data?.answer || "Summary unavailable.",
+      entities: data?.entities || [],
+      comparison: data?.comparison || [],
+      roadmap: data?.roadmap || []
+    };
     
     hideTyping();
 
-    // SHOW THE "BIG CHAT" (The 150-line expert response)
-    addAssistantMessage(data.big_chat || data.answer, query);
+    // SHOW THE "BIG CHAT" using the safer state data
+    addAssistantMessage(window.geoData.big_chat, query);
     
-    // Update the Synthesis Card below the chat
-    document.getElementById("aiResponse").textContent = data.answer;
-    document.getElementById("entityHighlights").innerHTML = (data.entities || [])
+    // Update the Synthesis Card with fallback protection
+    document.getElementById("aiResponse").textContent = window.geoData.answer;
+    document.getElementById("entityHighlights").innerHTML = window.geoData.entities
       .map(e => `<span class="px-3 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-500">${e}</span>`)
       .join("");
     
@@ -240,7 +252,7 @@ async function performFullAnalysis(domain, competitors, query) {
   } catch (error) {
     hideTyping();
     alert("Friday Connection Error: " + error.message);
-    console.error(error);
+    console.error("Analysis Debug:", error);
   } finally {
     isSending = false;
   }
