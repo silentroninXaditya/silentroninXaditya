@@ -44,6 +44,21 @@ body { background: var(--bg); color: var(--text); overflow-x: hidden; }
 
 .hidden { display: none !important; }
 
+  /* Fix for big expert chats & squashed tables */
+.bubble { white-space: pre-wrap; word-break: break-word; }
+
+#geoScreen .overflow-hidden {
+    overflow-x: auto !important;
+    display: block;
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+}
+
+#comparisonBody td {
+    min-width: 200px; /* Forces space for expert data */
+    padding: 16px;
+    vertical-align: top;
+}
 /* Scrollbar */
 * { scrollbar-width: thin; scrollbar-color: #2e2e2e transparent; }
 ::-webkit-scrollbar { width: 8px; }
