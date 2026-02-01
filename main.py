@@ -1,8 +1,8 @@
-import os, json, logging, httpx, uvicorn
+import os, json, logging, httpx, uvicorn, asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from groq import AsyncGroq # Ensure 'groq' is in requirements.txt
+from groq import AsyncGroq 
 
 # Logging Setup
 logging.basicConfig(level=logging.INFO)
@@ -35,43 +35,65 @@ async def get_jina_content(url: str):
         headers["Authorization"] = f"Bearer {jina_key}"
         
     try:
-        jina_url = f"https://r.jina.ai/{url}"
+        # Clean URL to prevent routing errors
+        clean_url = url.strip().replace(" ", "")
+        jina_url = f"https://r.jina.ai/{clean_url}"
         async with httpx.AsyncClient() as client:
-            # 20s timeout is safer for heavy pages in 2026
-            response = await client.get(jina_url, headers=headers, timeout=20.0)
+            # 15s timeout per request to keep the total cycle under Render's limit
+            response = await client.get(jina_url, headers=headers, timeout=15.0)
             if response.status_code == 200:
-                return response.text[:15000] # Trim to stay within token limits
-            return f"Error: Scraper returned status {response.status_code}"
+                return response.text[:8000] # Optimized chunk size for context window
+            return "" 
     except Exception as e:
-        logger.error(f"Scrape failed: {e}")
-        return "Scraping failed due to connection error."
+        logger.error(f"Scrape failed for {url}: {e}")
+        return ""
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
-        content = await get_jina_content(req.url)
+        # Step 1: Parallel Scraping (Target + Competitors)
+        # This ensures we actually have data on the competition
+        comp_list = [c.strip() for c in req.competitors.split(",") if c.strip()][:2]
+        urls_to_scrape = [req.url] + comp_list
+        
+        # Gather all content simultaneously
+        scraping_results = await asyncio.gather(*[get_jina_content(u) for u in urls_to_scrape])
+        
+        target_content = scraping_results[0]
+        competitor_context = "\n\n".join(scraping_results[1:])
+
         groq_key = os.getenv("GROQ_API_KEY")
         if not groq_key:
             raise HTTPException(status_code=500, detail="GROQ_API_KEY missing")
         
         client = AsyncGroq(api_key=groq_key)
         
-        # System instruction tuned for 100-150 line expert analysis
+        # Step 2: Expert Intelligence Prompt
         system_msg = (
             "You are Friday, a GEO Intelligence Expert. Analyze content deeply. "
-            "You MUST return a JSON object with a field 'big_chat' containing a 100-150 line expert report "
-            "using Markdown (bolding, lists). Also fill 'answer', 'entities', 'comparison', and 'roadmap'."
+            "You MUST return a JSON object with: "
+            "1. 'big_chat': A 100-150 line expert report using Markdown (bolding, lists). "
+            "2. 'answer': A concise summary. "
+            "3. 'entities': A list of key SEO/GEO entities identified. "
+            "4. 'comparison': A list of {factor, you, competitor} objects. "
+            "5. 'roadmap': A list of {title, desc} objects."
+        )
+
+        user_content = (
+            f"TARGET SITE: {req.url}\nCONTENT: {target_content}\n\n"
+            f"COMPETITOR DATA: {competitor_context}\n\n"
+            f"USER QUERY: {req.question}"
         )
 
         chat_completion = await client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"URL: {req.url}\nCompetitors: {req.competitors}\nQuestion: {req.question}\n\nContent: {content}"}
+                {"role": "user", "content": user_content}
             ],
             model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"},
-            max_tokens=4000, # Large overhead for 150 lines
-            temperature=0.5
+            max_tokens=4000,
+            temperature=0.4 # Lower temperature for more stable JSON formatting
         )
         
         return json.loads(chat_completion.choices[0].message.content)
